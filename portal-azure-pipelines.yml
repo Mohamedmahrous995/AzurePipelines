@@ -1,0 +1,55 @@
+# Docker
+# Build and push an image to Azure Container Registry
+# https://docs.microsoft.com/azure/devops/pipelines/languages/docker
+
+trigger:
+- main
+
+resources:
+- repo: self
+
+variables:
+  # Container registry service connection established during pipeline creation
+  dockerRegistryServiceConnection: ''
+  imageRepository: 'adminimage'
+  containerRegistry: 'visitorcrdev.azurecr.io'
+  dockerfilePath: '$(Build.SourcesDirectory)/Dockerfile'
+  tag: '$(Build.BuildId)'
+
+  # Agent VM image name
+  vmImageName: 'ubuntu-latest'
+
+stages:
+- stage: Build
+  displayName: Build and push stage
+  jobs:
+  - job: Build
+    displayName: Build
+    pool:
+      vmImage: $(vmImageName)
+    steps:
+    - task: Docker@2
+      displayName: Build and push an image to container registry
+      inputs:
+        command: buildAndPush
+        repository: $(imageRepository)
+        dockerfile: $(dockerfilePath)
+        containerRegistry: $(dockerRegistryServiceConnection)
+        tags: |
+          $(tag)
+    - task: AzureWebAppContainer@1
+      inputs:
+        azureSubscription: '<Azure service connection>'
+        appName: '<Name of the web app>'
+        imageName: $(containerRegistry)/$(imageRepository):$(tag)
+        deployToSlotOrASE: true
+        resourceGroupName: '<Name of the resource group>'
+        slotName: staging
+
+    - task: AzureAppServiceManage@0
+      inputs:
+        azureSubscription: '<Azure service connection>'
+        WebAppName: '<name of web app>'
+        ResourceGroupName: '<name of resource group>'
+        SourceSlot: staging
+        SwapWithProduction: true      

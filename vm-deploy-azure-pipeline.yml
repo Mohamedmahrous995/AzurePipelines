@@ -1,0 +1,64 @@
+# Starter pipeline
+# Start with a minimal pipeline that you can customize to build and deploy your code.
+# Add steps that build, run tests, deploy, and more:
+# https://aka.ms/yaml
+
+trigger:
+- main
+- production
+
+pool:
+ vmImage: ubuntu-latest
+
+stages:
+  - stage: Build
+    displayName: Build stage
+    jobs:  
+    - job: Build
+      displayName: Build
+      steps:
+      - task: CopyFiles@2
+        inputs:
+          SourceFolder: '$(System.DefaultWorkingDirectory)/prod'
+          #Contents: 'serverPrequisites.sh' 
+          TargetFolder: '$(Build.ArtifactStagingDirectory)/prod'
+      - task: PublishPipelineArtifact@1
+        displayName: 'Upload artifacts to pipeline'
+        inputs:
+          targetPath: '$(Build.ArtifactStagingDirectory)'
+          artifact: 'drop'
+          publishLocation: 'pipeline'
+    
+ 
+          
+
+  - stage: DeployToProd
+    variables:
+      environmentName: 'Production'
+    jobs:
+    - deployment: VMDeploy
+      displayName: Web deploy
+      environment:
+        name: production 
+        resourceType: VirtualMachine
+        tags: production
+      strategy:
+       runOnce:
+         deploy:
+           steps:
+            - task: DownloadPipelineArtifact@2
+              inputs:
+                buildType: 'current'
+                artifactName: 'drop'
+                targetPath: '$(Pipeline.Workspace)/drop/'
+
+            - script: |
+
+                cd /home/azureuser/azagent/_work/1/drop/prod
+                sudo chmod +x prequisites.sh
+                sudo ./prequisites.sh
+                docker-compose up -d
+  
+
+
+

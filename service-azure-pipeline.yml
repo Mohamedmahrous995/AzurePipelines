@@ -1,0 +1,107 @@
+# Docker
+# Build and push an image to Azure Container Registry
+# https://docs.microsoft.com/azure/devops/pipelines/languages/docker
+
+trigger:
+  - main
+
+resources:
+  - repo: self
+
+variables:
+  - group: talanted
+  - name: tag
+    value: "$(Build.BuildId)"
+  - name: vmImageName
+    value: "ubuntu-latest"
+
+stages:
+  - stage: Build
+    displayName: Build and push stage
+    pool:
+      vmImage: $(vmImageName)
+    jobs:
+      - job: BuildAndTest
+        displayName: Build & Test
+        steps:
+          - task: Docker@2
+            displayName: Build docker image
+            inputs:
+              command: build
+              containerRegistry: "dclick_jeel_dev"
+              repository: "$(docker_repo_name)"
+              Dockerfile: "**/Dockerfile"
+
+          - script: |
+              export unittestslayerid=$(docker images --filter "label=unittestlayer=true" -q)
+                env
+                docker create --name unittestcontainer $unittestslayerid
+                docker cp unittestcontainer:/out/testresults ./testresults
+                docker stop unittestcontainer
+                docker rm unittestcontainer
+            displayName: Copy test results
+            continueOnError: false
+
+          - task: PublishTestResults@2
+            displayName: "Publish Test Results"
+            condition: succeededOrFailed()
+            inputs:
+              testRunner: VSTest
+              testResultsFiles: "**/proj.VisitorService.tests.xml"
+              searchFolder: "$(System.DefaultWorkingDirectory)/testresults"
+              publishRunAttachments: true
+              failTaskOnFailedTests: true
+
+          - task: PublishCodeCoverageResults@1
+            inputs:
+              codeCoverageTool: "Cobertura"
+              summaryFileLocation: "$(System.DefaultWorkingDirectory)/testresults/*/coverage.cobertura.xml"
+              displayName: "Publish coverage reports"
+
+          - task: CopyFiles@2
+            displayName: "Copy arm templates to staging directory"
+            inputs:
+              sourceFolder: "$(Build.SourcesDirectory)/infrastructure"
+              contents: "**"
+              targetFolder: "$(Build.ArtifactStagingDirectory)/Arm"
+
+          - task: PublishPipelineArtifact@1
+            displayName: "Upload artifacts to pipeline"
+            inputs:
+              targetPath: "$(Build.ArtifactStagingDirectory)"
+              artifact: "drop"
+              publishLocation: "pipeline"
+
+          - task: Docker@2
+            condition: and(succeeded(), ne(variables['Build.Reason'], 'PullRequest'))
+            displayName: "Publish Docker"
+            inputs:
+              containerRegistry: "dev"
+              repository: "$(repo_name)"
+              command: "push"
+
+  - stage: "DeployToDev"
+    displayName: "Deploy infrastructure to the dev environment"
+    condition: and(succeeded(), ne(variables['Build.Reason'], 'PullRequest'))
+    dependsOn: "Build"
+    variables:
+      - group: common-jeel-dev
+    jobs:
+      - template: "deployment-template.yml"
+        parameters:
+          serviceConnectionName: "azure-connection"
+          environment: "Dev"
+          docker_repoName: "$(repo_name)"
+
+  - stage: "DeployToTest"
+    displayName: "Deploy infrastructure to the Test environment"
+    condition: and(succeeded(), ne(variables['Build.Reason'], 'PullRequest'))
+    dependsOn: "DeployToDev"
+    variables:
+      - group: talanted
+    jobs:
+      - template: "deployment-template.yml"
+        parameters:
+          serviceConnectionName: "azure-connection"
+          environment: "Test"
+          docker_repoName: "$(repo_name)"

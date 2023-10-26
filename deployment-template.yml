@@ -1,0 +1,55 @@
+jobs:
+  - deployment: DeployInfrastructure
+    displayName: Deploy Infrastructure
+    environment: ${{ parameters.environment}}
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+            - task: DownloadPipelineArtifact@2
+              inputs:
+                buildType: 'current'
+                artifactName: 'drop'
+                targetPath: '$(Pipeline.Workspace)/drop/'
+
+            - task: replacetokens@5
+              displayName: Replace Tokens
+              inputs:
+                rootDirectory: '$(Pipeline.Workspace)/drop/Arm'
+                targetFiles: '**/*.json'
+                encoding: 'auto'
+                tokenPattern: 'default'
+                writeBOM: true
+                actionOnMissing: 'warn'
+                keepToken: false
+                actionOnNoFiles: 'continue'
+                enableTransforms: false
+                enableRecursion: false
+                useLegacyPattern: false
+                enableTelemetry: true
+
+            - task: AzureResourceManagerTemplateDeployment@3
+              displayName: Deploy Resources
+              inputs:
+                deploymentScope: 'Resource Group'
+                azureResourceManagerConnection: '${{ parameters.serviceConnectionName }}'
+                subscriptionId: '6d5cbc0a-2e0a-4d07-98b8-c80779e82a42'
+                action: 'Create Or Update Resource Group'
+                resourceGroupName: '$(resource_group)'
+                location: '$(location)'
+                templateLocation: 'Linked artifact'
+                csmFile: '$(Pipeline.Workspace)/drop/Arm/azure.bicep'
+                csmParametersFile: '$(Pipeline.Workspace)/drop/Arm/azure.parameters.json'
+                deploymentMode: Incremental
+                deploymentName: '$(Build.Repository.Name)_DeployResources_$(Build.BuildNumber)'
+
+            - task: AzureRmWebAppDeployment@4
+              displayName: Deploy Service
+              inputs:
+                ConnectionType: 'AzureRM'
+                azureSubscription: '${{ parameters.serviceConnectionName }}'
+                appType: 'webAppContainer'
+                WebAppName: $(visitor_service_name)
+                DockerNamespace: '$(docker_hostname)'
+                DockerRepository: '${{ parameters.docker_repoName }}'
+                DockerImageTag: '$(tag)'
